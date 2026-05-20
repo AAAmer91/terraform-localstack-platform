@@ -1,3 +1,6 @@
+// Outputs are part of the developer and CI contract. The workflow consumes
+// these values instead of reconstructing names or endpoint URLs by hand.
+
 output "api_gateway_invoke_url" {
   description = "LocalStack URL for posting GitHub webhook events."
   value       = "${var.localstack_endpoint}/_aws/execute-api/${aws_api_gateway_rest_api.webhook.id}/${aws_api_gateway_stage.webhook.stage_name}/webhooks/github"

@@ -1,3 +1,6 @@
+// These variables keep the stack portable across local and CI LocalStack runs.
+// The defaults intentionally describe the demo environment used by the README.
+
 variable "aws_region" {
   description = "AWS region used by the local AWS-compatible environment."
   type        = string

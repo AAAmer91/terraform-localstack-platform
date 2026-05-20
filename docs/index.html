@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!--
+  Static architecture simulator for the Terraform LocalStack event platform.
+  It mirrors the production data flow in README.md without calling any APIs.
+-->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -485,13 +489,17 @@
 </div>
 
 <script>
+// Minimal helpers keep the simulator dependency-free and easy to host anywhere.
 const $ = id => document.getElementById(id);
 const delay = ms => new Promise(r => setTimeout(r, ms));
 let running = false;
 
+// Node ids match the DOM ids used by the diagram cards and status labels.
 const ALL_NODES = ['github','apigw','ingest','sqs','proc','s3','ddb','dlq','logs'];
 
 function reset() {
+  // Reset both the visual pipeline and the log output so repeated runs are
+  // deterministic for demos and screenshots.
   ALL_NODES.forEach(id => {
     const n = $('n-' + id);
     if (n) { n.className = 'node'; n.style.opacity = ''; }
@@ -512,6 +520,7 @@ function reset() {
 }
 
 async function light(id, state, sub) {
+  // Flash one pipeline node, then keep it visible as a completed step.
   const n = $('n-' + id);
   const s = $('s-' + id);
   if (!n) return;
@@ -523,6 +532,7 @@ async function light(id, state, sub) {
 }
 
 function setLog(msg, state) {
+  // Restart the CSS animation by forcing a reflow between class changes.
   const lb = $('logbar');
   const ll = $('log-line');
   lb.className = 'log-output ' + (state || '');
@@ -533,6 +543,8 @@ function setLog(msg, state) {
 }
 
 async function run() {
+  // Guard against overlapping animations; the UI is intentionally linear so it
+  // reads like a CI trace of one webhook delivery.
   if (running) return;
   running = true;
   $('runBtn').disabled = true;

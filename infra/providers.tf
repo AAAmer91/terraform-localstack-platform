@@ -1,4 +1,6 @@
 provider "aws" {
+  # LocalStack accepts static placeholder credentials. Real AWS credentials are
+  # intentionally not required for this demonstration stack or CI workflow.
   region     = var.aws_region
   access_key = "test"
   secret_key = "test"
@@ -8,9 +10,11 @@ provider "aws" {
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
 
-  # Required so S3 works cleanly with the LocalStack edge endpoint.
+  # Path-style addressing keeps all S3 traffic on the LocalStack edge endpoint
+  # instead of trying bucket-name hostnames such as bucket.localhost.
   s3_use_path_style = true
 
+  # Route every AWS service used by the platform to LocalStack.
   endpoints {
     apigateway = var.localstack_endpoint
     dynamodb   = var.localstack_endpoint

@@ -1,5 +1,7 @@
 name: Terraform LocalStack CI
 
+# Run the same end-to-end LocalStack validation for pull requests and pushes
+# that touch application code, Terraform, or the workflow itself.
 on:
   pull_request:
     paths:
@@ -22,6 +24,8 @@ jobs:
     name: Validate Terraform with LocalStack
     runs-on: ubuntu-latest
 
+    # LocalStack and the AWS provider both accept placeholder credentials. The
+    # workflow must not depend on real AWS account access.
     env:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
@@ -29,6 +33,8 @@ jobs:
 
     services:
       localstack:
+        # Version 4.4.0 keeps this demo on the pre-auth-token LocalStack image
+        # while still supporting Lambda, API Gateway, SQS, and the other APIs.
         image: localstack/localstack:4.4.0
         ports:
           - 4566:4566
@@ -37,6 +43,8 @@ jobs:
           SERVICES: apigateway,dynamodb,iam,lambda,logs,s3,sqs,sts
           AWS_DEFAULT_REGION: eu-central-1
         volumes:
+          # Lambda execution in LocalStack needs access to the runner Docker
+          # socket so function containers can be started inside the CI job.
           - /var/run/docker.sock:/var/run/docker.sock
 
     defaults:
@@ -56,6 +64,8 @@ jobs:
       - name: Run Lambda unit tests
         working-directory: .
         run: |
+          # Unit tests catch handler contract regressions before Terraform work
+          # starts, keeping CI failures close to their source.
           echo "## 🚀 LocalStack CI Run Summary" >> $GITHUB_STEP_SUMMARY
           echo "### 🧪 Unit Tests" >> $GITHUB_STEP_SUMMARY
           
@@ -65,6 +75,8 @@ jobs:
 
       - name: Wait for LocalStack
         run: |
+          # The service container can be started before the LocalStack edge
+          # endpoint is ready to receive API calls.
           for i in {1..30}; do
             if curl -fsS http://localhost:4566/_localstack/health > /dev/null; then
               echo "LocalStack is ready."
@@ -81,6 +93,8 @@ jobs:
         run: pip install awscli-local
 
       - name: Create Terraform state bucket
+        # Terraform initializes against this bucket in the following step; it is
+        # created outside Terraform because it stores Terraform's own state.
         run: awslocal s3 mb s3://localstack-platform-terraform-state || true
 
       - name: Terraform format check
@@ -107,6 +121,8 @@ jobs:
 
       - name: Wait for Lambda functions
         run: |
+          # LocalStack Lambda creation is asynchronous. Waiting here avoids a
+          # race where API Gateway can invoke a function before it is active.
           ingest_lambda_name="$(terraform output -raw ingest_lambda_name)"
           processor_lambda_name="$(terraform output -raw processor_lambda_name)"
           awslocal lambda wait function-active-v2 --function-name "$ingest_lambda_name"
@@ -114,6 +130,8 @@ jobs:
 
       - name: Post GitHub webhook through API Gateway (Push)
         run: |
+          # The delivery id is reused across all assertions so the API response,
+          # DynamoDB row, S3 key, and CloudWatch log can be correlated.
           echo "### 🔄 End-to-End Integration" >> $GITHUB_STEP_SUMMARY
           
           api_url="$(terraform output -raw api_gateway_invoke_url)"
@@ -136,6 +154,8 @@ jobs:
           JSON
 
           http_status="$(
+            # Exercise the real HTTP ingress path instead of invoking Lambda
+            # directly; this is the same boundary a webhook provider would hit.
             curl -sS \
               -o response.json \
               -w "%{http_code}" \
@@ -163,6 +183,8 @@ jobs:
 
       - name: Verify processed event in DynamoDB and S3
         run: |
+          # Processing is asynchronous through SQS, so poll for the DynamoDB
+          # status before asserting the final S3 archive.
           delivery_id="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           bucket_name="$(terraform output -raw bucket_name)"
           table_name="$(terraform output -raw table_name)"
@@ -204,6 +226,8 @@ jobs:
 
       - name: Verify structured processor log
         run: |
+          # The log assertion proves the processor emitted an operational event
+          # that can be queried independently from storage side effects.
           delivery_id="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           processor_log_group="$(terraform output -raw processor_log_group_name)"
 
@@ -231,6 +255,8 @@ jobs:
 
       - name: Test Variant A - Dynamic S3 Routing (Pull Request)
         run: |
+          # A second event type confirms the processor partitions archived
+          # payloads by webhook type, not just by the happy-path push fixture.
           echo "### 🔀 Dynamic Routing Test" >> $GITHUB_STEP_SUMMARY
           api_url="$(terraform output -raw api_gateway_invoke_url)"
           delivery_id="pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -252,6 +278,8 @@ jobs:
 
       - name: Test Variant B - Simulate Processor Failure (DLQ)
         run: |
+          # A malformed message validates the failure path and SQS redrive into
+          # the dead-letter queue.
           echo "### ☠️ Dead-Letter Queue (DLQ) Test" >> $GITHUB_STEP_SUMMARY
           
           queue_name="$(terraform output -raw queue_name)"

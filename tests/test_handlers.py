@@ -1,3 +1,10 @@
+"""Unit tests for Lambda handler behavior without requiring LocalStack.
+
+The production handlers expose module-level AWS clients for Lambda reuse. These
+tests replace those clients with small fakes so the assertions focus on payload
+translation, persistence intent, and response shape.
+"""
+
 import importlib
 import json
 import os
@@ -7,10 +14,14 @@ from pathlib import Path
 
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
+# Import handlers the same way Lambda does: by module name inside the package
+# archive, rather than through a test-only package path.
 sys.path.insert(0, str(APP_DIR))
 
 
 class FakeSqsClient:
+    """Capture outbound SQS messages for assertions."""
+
     def __init__(self):
         self.messages = []
 
@@ -20,6 +31,8 @@ class FakeSqsClient:
 
 
 class FakeS3Client:
+    """Capture archived objects without touching S3 or LocalStack."""
+
     def __init__(self):
         self.objects = []
 
@@ -29,6 +42,8 @@ class FakeS3Client:
 
 
 class FakeTable:
+    """Capture DynamoDB items written by the processor."""
+
     def __init__(self):
         self.items = []
 
@@ -38,6 +53,8 @@ class FakeTable:
 
 
 class FakeDynamoResource:
+    """Mimic the boto3 resource API used by the processor handler."""
+
     def __init__(self, table):
         self.table = table
 
@@ -48,6 +65,7 @@ class FakeDynamoResource:
 
 class HandlerTests(unittest.TestCase):
     def test_ingest_handler_enqueues_github_webhook(self):
+        """Ingest should acknowledge the webhook only after SQS enqueue."""
         os.environ["QUEUE_URL"] = "http://localhost:4566/000000000000/events"
         ingest_handler = importlib.import_module("ingest_handler")
         fake_sqs = FakeSqsClient()
@@ -84,6 +102,7 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(message["payload"]["ref"], "refs/heads/main")
 
     def test_processor_handler_archives_event_and_indexes_metadata(self):
+        """Processor should archive raw payloads and index searchable metadata."""
         os.environ["BUCKET_NAME"] = "localstack-platform-dev-events"
         os.environ["TABLE_NAME"] = "localstack-platform-dev-events"
         processor_handler = importlib.import_module("processor_handler")
