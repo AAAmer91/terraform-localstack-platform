@@ -98,6 +98,7 @@ jobs:
 
           awslocal lambda invoke \
             --function-name "$lambda_name" \
+            --cli-binary-format raw-in-base64-out \
             --payload '{"source":"github-actions","message":"hello from CI"}' \
             response.json
 
