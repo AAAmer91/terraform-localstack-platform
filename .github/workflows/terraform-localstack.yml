@@ -264,7 +264,8 @@ jobs:
             --queue-url "$queue_url" \
             --message-body '{"malformed_payload": true}' > /dev/null
           
-          for i in {1..30}; do
+          # Increased loop from 30 to 60 to account for (60s visibility timeout * 2 retries = 120s minimum wait)
+          for i in {1..60}; do
             messages="$(awslocal sqs receive-message --queue-url "$dlq_url" --max-number-of-messages 1 --query 'Messages' --output json)"
             
             if [[ "$messages" != "null" && "$messages" != "[]" ]]; then
