@@ -1,5 +1,7 @@
 # Terraform LocalStack Event Platform
 
+[![Interactive Architecture Simulator](https://img.shields.io/badge/%F0%9F%8E%AE_Try_the_Interactive_Simulator-Live_Demo-blue?style=for-the-badge)](https://aaamer91.github.io/terraform-localstack-platform/)
+
 Local AWS event-ingestion platform built with Terraform and LocalStack. The stack exposes a GitHub-style webhook endpoint, buffers accepted events through SQS, processes them asynchronously, archives raw payloads in S3, indexes metadata in DynamoDB, and validates the full path in GitHub Actions.
 
 ## Architecture
