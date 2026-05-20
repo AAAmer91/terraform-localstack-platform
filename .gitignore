@@ -35,6 +35,11 @@ app/handler.zip
 *.zip
 infra/payload.json
 infra/response.json
+infra/webhook.json
+infra/item.json
+infra/archived.json
+infra/logs.json
+infra/s3_key.txt
 
 # --- OS ---
 .DS_Store

@@ -12,12 +12,14 @@ provider "aws" {
   s3_use_path_style = true
 
   endpoints {
-    s3       = var.localstack_endpoint
-    dynamodb = var.localstack_endpoint
-    lambda   = var.localstack_endpoint
-    iam      = var.localstack_endpoint
-    logs     = var.localstack_endpoint
-    sts      = var.localstack_endpoint
+    apigateway = var.localstack_endpoint
+    dynamodb   = var.localstack_endpoint
+    iam        = var.localstack_endpoint
+    lambda     = var.localstack_endpoint
+    logs       = var.localstack_endpoint
+    s3         = var.localstack_endpoint
+    sqs        = var.localstack_endpoint
+    sts        = var.localstack_endpoint
   }
 
   default_tags {

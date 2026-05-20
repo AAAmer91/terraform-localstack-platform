@@ -36,7 +36,7 @@ jobs:
           - 4566:4566
           - 4510-4559:4510-4559
         env:
-          SERVICES: s3,dynamodb,lambda,iam,logs,sts
+          SERVICES: apigateway,dynamodb,iam,lambda,logs,s3,sqs,sts
           AWS_DEFAULT_REGION: eu-central-1
         volumes:
           - /var/run/docker.sock:/var/run/docker.sock
@@ -55,6 +55,10 @@ jobs:
         with:
           terraform_wrapper: false
 
+      - name: Run Lambda unit tests
+        working-directory: .
+        run: python -m unittest discover -s tests -v
+
       - name: Wait for LocalStack
         run: |
           for i in {1..30}; do
@@ -70,11 +74,18 @@ jobs:
           echo "LocalStack did not become ready in time."
           exit 1
 
+      - name: Install awslocal
+        working-directory: .
+        run: pip install awscli-local
+
+      - name: Create Terraform state bucket
+        run: awslocal s3 mb s3://localstack-platform-terraform-state || true
+
       - name: Terraform format check
         run: terraform fmt -check -recursive
 
       - name: Terraform init
-        run: terraform init -input=false
+        run: terraform init -input=false -reconfigure -backend-config=backend.localstack.hcl
 
       - name: Terraform validate
         run: terraform validate
@@ -85,34 +96,156 @@ jobs:
       - name: Terraform apply
         run: terraform apply -input=false -auto-approve tfplan
 
-      - name: Install awslocal
-        working-directory: .
-        run: pip install awscli-local
-
-      - name: Invoke Lambda
+      - name: Wait for Lambda functions
         run: |
-          lambda_name="$(terraform output -raw lambda_name)"
+          ingest_lambda_name="$(terraform output -raw ingest_lambda_name)"
+          processor_lambda_name="$(terraform output -raw processor_lambda_name)"
 
           awslocal lambda wait function-active-v2 \
-            --function-name "$lambda_name"
+            --function-name "$ingest_lambda_name"
 
-          awslocal lambda invoke \
-            --function-name "$lambda_name" \
-            --cli-binary-format raw-in-base64-out \
-            --payload '{"source":"github-actions","message":"hello from CI"}' \
-            response.json
+          awslocal lambda wait function-active-v2 \
+            --function-name "$processor_lambda_name"
 
-          cat response.json
-
-      - name: Verify S3 object was created
+      - name: Post GitHub webhook through API Gateway
         run: |
+          api_url="$(terraform output -raw api_gateway_invoke_url)"
+          delivery_id="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          cat > webhook.json <<JSON
+          {
+            "ref": "refs/heads/main",
+            "repository": {
+              "full_name": "AAAmer91/terraform-localstack-platform"
+            },
+            "pusher": {
+              "name": "github-actions"
+            },
+            "head_commit": {
+              "id": "${GITHUB_SHA}",
+              "message": "CI webhook integration test"
+            }
+          }
+          JSON
+
+          http_status="$(
+            curl -sS \
+              -o response.json \
+              -w "%{http_code}" \
+              -X POST "$api_url" \
+              -H "Content-Type: application/json" \
+              -H "X-GitHub-Event: push" \
+              -H "X-GitHub-Delivery: $delivery_id" \
+              --data @webhook.json
+          )"
+
+          python - "$http_status" "$delivery_id" <<'PY'
+          import json
+          import sys
+
+          http_status = sys.argv[1]
+          delivery_id = sys.argv[2]
+          response = json.load(open("response.json", encoding="utf-8"))
+
+          assert http_status == "202", f"expected HTTP 202, got {http_status}: {response}"
+          assert response["event_id"] == delivery_id
+          assert response["event_type"] == "push"
+          assert response["repository"] == "AAAmer91/terraform-localstack-platform"
+          assert response["status"] == "queued"
+          PY
+
+      - name: Verify processed event in DynamoDB and S3
+        run: |
+          delivery_id="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           bucket_name="$(terraform output -raw bucket_name)"
-          awslocal s3 ls "s3://$bucket_name/events/"
-
-      - name: Verify DynamoDB item was created
-        run: |
           table_name="$(terraform output -raw table_name)"
-          awslocal dynamodb scan --table-name "$table_name"
+
+          for i in {1..30}; do
+            awslocal dynamodb get-item \
+              --table-name "$table_name" \
+              --key "{\"event_id\":{\"S\":\"$delivery_id\"}}" \
+              > item.json
+
+            if python - <<'PY'
+          import json
+          import sys
+
+          item = json.load(open("item.json", encoding="utf-8")).get("Item", {})
+          sys.exit(0 if item.get("status", {}).get("S") == "processed" else 1)
+          PY
+            then
+              break
+            fi
+
+            echo "Waiting for processor Lambda to index event..."
+            sleep 2
+          done
+
+          python - "$delivery_id" <<'PY'
+          import json
+          import sys
+
+          delivery_id = sys.argv[1]
+          item = json.load(open("item.json", encoding="utf-8")).get("Item", {})
+
+          assert item["event_id"]["S"] == delivery_id
+          assert item["event_type"]["S"] == "push"
+          assert item["repository"]["S"] == "AAAmer91/terraform-localstack-platform"
+          assert item["status"]["S"] == "processed"
+          assert item["s3_key"]["S"] == f"events/push/{delivery_id}.json"
+
+          open("s3_key.txt", "w", encoding="utf-8").write(item["s3_key"]["S"])
+          PY
+
+          s3_key="$(cat s3_key.txt)"
+          awslocal s3api head-object --bucket "$bucket_name" --key "$s3_key"
+          awslocal s3 cp "s3://$bucket_name/$s3_key" archived.json
+
+          python - <<'PY'
+          import json
+
+          archived = json.load(open("archived.json", encoding="utf-8"))
+          assert archived["ref"] == "refs/heads/main"
+          assert archived["repository"]["full_name"] == "AAAmer91/terraform-localstack-platform"
+          PY
+
+      - name: Verify structured processor log
+        run: |
+          delivery_id="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          processor_log_group="$(terraform output -raw processor_log_group_name)"
+
+          for i in {1..30}; do
+            awslocal logs filter-log-events \
+              --log-group-name "$processor_log_group" \
+              > logs.json
+
+            if python - "$delivery_id" <<'PY'
+          import json
+          import sys
+
+          delivery_id = sys.argv[1]
+          events = json.load(open("logs.json", encoding="utf-8")).get("events", [])
+          messages = [event.get("message", "") for event in events]
+          found = any("event_processed" in message and delivery_id in message for message in messages)
+          sys.exit(0 if found else 1)
+          PY
+            then
+              break
+            fi
+
+            echo "Waiting for structured processor log..."
+            sleep 2
+          done
+
+          python - "$delivery_id" <<'PY'
+          import json
+          import sys
+
+          delivery_id = sys.argv[1]
+          events = json.load(open("logs.json", encoding="utf-8")).get("events", [])
+          messages = [event.get("message", "") for event in events]
+          assert any("event_processed" in message and delivery_id in message for message in messages)
+          PY
 
       - name: Terraform destroy
         if: always()
