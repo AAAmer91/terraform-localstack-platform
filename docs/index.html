@@ -1,138 +1,615 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Platform Architecture Simulator</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; background: #f6f8fa; }
-        .controls { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        .node { display: inline-block; padding: 15px 25px; margin: 10px; border-radius: 6px; font-weight: bold; text-align: center; color: white; transition: 0.3s; }
-        .github { background: #24292e; }
-        .api { background: #cc2282; }
-        .lambda { background: #ff9900; }
-        .sqs { background: #ff4f8b; }
-        .s3 { background: #5694ca; }
-        .ddb { background: #2b6cb0; }
-        .dlq { background: #e53e3e; }
-        
-        .active { transform: scale(1.1); box-shadow: 0 0 15px rgba(0,0,0,0.3); }
-        .error { animation: shake 0.5s; background: #e53e3e !important; }
-        
-        @keyframes shake {
-            0% { transform: translateX(0); }
-            25% { transform: translateX(-5px); }
-            50% { transform: translateX(5px); }
-            75% { transform: translateX(-5px); }
-            100% { transform: translateX(0); }
-        }
-        
-        .row { display: flex; align-items: center; justify-content: center; margin: 20px 0; }
-        .arrow { font-size: 24px; font-weight: bold; color: #cbd5e0; margin: 0 10px; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Terraform LocalStack Platform — Architecture Simulator</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.33.0/dist/tabler-icons.min.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:    #ffffff;
+      --bg-secondary:  #f6f8fa;
+      --bg-tertiary:   #eef0f3;
+      --text-primary:  #1a1a1a;
+      --text-secondary:#57606a;
+      --text-hint:     #8c959f;
+      --border-weak:   rgba(0,0,0,0.10);
+      --border-mid:    rgba(0,0,0,0.18);
+      --border-strong: rgba(0,0,0,0.28);
+      --green-bg:      #eaf3de;
+      --green-border:  #639922;
+      --green-text:    #3b6d11;
+      --red-bg:        #fcebeb;
+      --red-border:    #e24b4a;
+      --red-text:      #a32d2d;
+      --amber-bg:      #faeeda;
+      --amber-border:  #ba7517;
+      --amber-text:    #854f0b;
+      --radius-sm:     6px;
+      --radius-md:     8px;
+      --radius-lg:     12px;
+      --mono:          'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+      --sans:          -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-primary:    #1c1c1e;
+        --bg-secondary:  #2c2c2e;
+        --bg-tertiary:   #3a3a3c;
+        --text-primary:  #f5f5f7;
+        --text-secondary:#aeaeb2;
+        --text-hint:     #636366;
+        --border-weak:   rgba(255,255,255,0.08);
+        --border-mid:    rgba(255,255,255,0.14);
+        --border-strong: rgba(255,255,255,0.22);
+        --green-bg:      #17341a;
+        --green-border:  #4a8c20;
+        --green-text:    #a3d96a;
+        --red-bg:        #2d1212;
+        --red-border:    #c04040;
+        --red-text:      #f09595;
+        --amber-bg:      #2d1f06;
+        --amber-border:  #c47c1a;
+        --amber-text:    #f5c97a;
+      }
+    }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    .page {
+      max-width: 780px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      margin-bottom: 2rem;
+    }
+    .header h1 {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -.01em;
+    }
+    .header p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+    .header-meta {
+      display: flex;
+      gap: .75rem;
+      margin-top: .75rem;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-family: var(--mono);
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      border: 0.5px solid var(--border-weak);
+      background: var(--bg-primary);
+      color: var(--text-secondary);
+    }
+    .badge i { font-size: 12px; }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      padding: .75rem 1rem;
+      background: var(--bg-primary);
+      border: 0.5px solid var(--border-weak);
+      border-radius: var(--radius-md);
+      margin-bottom: 1.5rem;
+    }
+    .toolbar-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .toolbar label {
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text-hint);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      white-space: nowrap;
+    }
+    .toolbar select {
+      font-size: 12px;
+      font-family: var(--mono);
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      border: 0.5px solid var(--border-mid);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      cursor: pointer;
+    }
+    .toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: var(--mono);
+      color: var(--text-secondary);
+      user-select: none;
+    }
+    .toggle-label input { cursor: pointer; accent-color: var(--red-border); }
+
+    .run-btn {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-family: var(--mono);
+      border-radius: var(--radius-sm);
+      border: 0.5px solid var(--border-mid);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: background .12s;
+    }
+    .run-btn:hover { background: var(--bg-secondary); }
+    .run-btn:active { transform: scale(.97); }
+    .run-btn i { font-size: 14px; }
+    .run-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+
+    /* Pipeline card */
+    .card {
+      background: var(--bg-primary);
+      border: 0.5px solid var(--border-weak);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    /* Nodes */
+    .pipeline { display: flex; flex-direction: column; align-items: center; gap: 0; }
+
+    .tier {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      width: 100%;
+    }
+
+    .node {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 118px;
+      min-height: 62px;
+      padding: 10px 8px;
+      border-radius: var(--radius-md);
+      border: 0.5px solid var(--border-weak);
+      background: var(--bg-secondary);
+      transition: border-color .2s, background .2s, transform .18s, opacity .3s;
+      flex-shrink: 0;
+    }
+    .node .ni { font-size: 18px; margin-bottom: 3px; color: var(--text-hint); transition: color .2s; }
+    .node .nl { font-size: 10px; font-weight: 600; color: var(--text-primary); text-align: center; line-height: 1.3; font-family: var(--mono); letter-spacing: -.01em; }
+    .node .ns { font-size: 9px; color: var(--text-hint); margin-top: 3px; text-align: center; line-height: 1.3; min-height: 12px; font-family: var(--mono); transition: color .2s; }
+
+    .node.ok  { background: var(--green-bg);  border-color: var(--green-border); transform: scale(1.06); }
+    .node.ok  .ni, .node.ok  .nl, .node.ok  .ns { color: var(--green-text); }
+    .node.err { background: var(--red-bg);    border-color: var(--red-border);   transform: scale(1.06); }
+    .node.err .ni, .node.err .nl, .node.err .ns { color: var(--red-text); }
+    .node.warn{ background: var(--amber-bg);  border-color: var(--amber-border); transform: scale(1.06); }
+    .node.warn .ni, .node.warn .nl, .node.warn .ns { color: var(--amber-text); }
+    .node.dim { opacity: .25; }
+
+    .arr { width: 24px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--border-strong); font-size: 13px; }
+    .arr-v { display: flex; justify-content: center; padding: 4px 0; color: var(--border-strong); font-size: 13px; width: 100%; }
+
+    /* Split paths */
+    .split-connector {
+      display: flex;
+      justify-content: center;
+      width: 100%;
+      padding: 2px 0;
+      position: relative;
+    }
+    .split-connector::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: calc(50% - 70px);
+      width: 140px;
+      height: 0.5px;
+      background: var(--border-mid);
+    }
+    .split-connector .dot-l,
+    .split-connector .dot-r {
+      position: absolute;
+      top: 50%;
+      width: 0.5px;
+      height: 14px;
+      background: var(--border-mid);
+      transform: translateY(0);
+    }
+    .split-connector .dot-l { left: calc(50% - 70px); }
+    .split-connector .dot-r { left: calc(50% + 70px); }
+
+    .branch-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 24px;
+      width: 100%;
+    }
+
+    /* DLQ path label */
+    .redrive-label {
+      font-size: 9px;
+      font-family: var(--mono);
+      color: var(--red-text);
+      text-align: center;
+      padding: 2px 0 6px;
+      opacity: 0;
+      transition: opacity .4s;
+    }
+    .redrive-label.show { opacity: 1; }
+
+    /* Log section */
+    .log-section { margin-top: 1rem; }
+    .log-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-family: var(--mono);
+      color: var(--text-hint);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: 6px;
+    }
+    .log-header i { font-size: 13px; }
+
+    .log-output {
+      background: var(--bg-secondary);
+      border: 0.5px solid var(--border-weak);
+      border-radius: var(--radius-md);
+      padding: .75rem 1rem;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text-hint);
+      min-height: 40px;
+      line-height: 1.7;
+      transition: border-color .2s;
+    }
+    .log-output.ok  { border-color: var(--green-border);  color: var(--green-text); }
+    .log-output.err { border-color: var(--red-border);    color: var(--red-text); }
+
+    .log-line { opacity: 0; transition: opacity .25s; display: block; }
+    .log-line.show { opacity: 1; }
+
+    /* Step legend */
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem;
+      margin-top: 1rem;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      font-family: var(--mono);
+      color: var(--text-secondary);
+    }
+    .legend-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* Footer */
+    .footer {
+      margin-top: 2rem;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text-hint);
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .footer a { color: var(--text-hint); text-decoration: none; }
+    .footer a:hover { color: var(--text-secondary); text-decoration: underline; }
+  </style>
 </head>
 <body>
+<div class="page">
 
-    <div class="controls">
-        <label>Event Type: </label>
-        <select id="eventType">
-            <option value="push">Push</option>
-            <option value="pull_request">Pull Request</option>
-        </select>
-        
-        <label style="margin-left: 20px;">
-            <input type="checkbox" id="simulateError"> Simulate Processor Error
-        </label>
-        
-        <button onclick="runSimulation()" style="margin-left: 20px; padding: 5px 15px; cursor: pointer;">Send Webhook</button>
+  <header class="header">
+    <h1>Terraform LocalStack Platform</h1>
+    <p>GitHub webhook ingestion pipeline — API Gateway → Lambda → SQS → S3 + DynamoDB</p>
+    <div class="header-meta">
+      <span class="badge"><i class="ti ti-brand-terraform"></i>Terraform</span>
+      <span class="badge"><i class="ti ti-brand-aws"></i>LocalStack</span>
+      <span class="badge"><i class="ti ti-bolt"></i>Lambda</span>
+      <span class="badge"><i class="ti ti-stack"></i>SQS</span>
+      <span class="badge"><i class="ti ti-brand-github-copilot"></i>GitHub Actions</span>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="toolbar-group">
+      <label for="evType">event</label>
+      <select id="evType">
+        <option value="push">push</option>
+        <option value="pull_request">pull_request</option>
+        <option value="release">release</option>
+      </select>
+    </div>
+    <label class="toggle-label">
+      <input type="checkbox" id="simErr">
+      simulate processor error
+    </label>
+    <button class="run-btn" id="runBtn" onclick="run()">
+      <i class="ti ti-player-play"></i> send webhook
+    </button>
+  </div>
+
+  <div class="card">
+    <div class="pipeline">
+
+      <!-- Row 1: GitHub → API GW → Ingest → SQS -->
+      <div class="tier">
+        <div class="node" id="n-github">
+          <i class="ti ti-brand-github ni"></i>
+          <span class="nl">GitHub</span>
+          <span class="ns" id="s-github"></span>
+        </div>
+        <div class="arr">→</div>
+        <div class="node" id="n-apigw">
+          <i class="ti ti-plug ni"></i>
+          <span class="nl">API Gateway</span>
+          <span class="ns" id="s-apigw"></span>
+        </div>
+        <div class="arr">→</div>
+        <div class="node" id="n-ingest">
+          <i class="ti ti-bolt ni"></i>
+          <span class="nl">Ingest Lambda</span>
+          <span class="ns" id="s-ingest"></span>
+        </div>
+        <div class="arr">→</div>
+        <div class="node" id="n-sqs">
+          <i class="ti ti-stack ni"></i>
+          <span class="nl">SQS Queue</span>
+          <span class="ns" id="s-sqs"></span>
+        </div>
+      </div>
+
+      <div class="arr-v">↓</div>
+
+      <!-- Row 2: Processor Lambda -->
+      <div class="tier">
+        <div class="node" id="n-proc">
+          <i class="ti ti-cpu ni"></i>
+          <span class="nl">Processor Lambda</span>
+          <span class="ns" id="s-proc"></span>
+        </div>
+      </div>
+
+      <!-- Success path -->
+      <div id="success-path">
+        <div class="split-connector">
+          <div class="dot-l"></div>
+          <div class="dot-r"></div>
+        </div>
+        <div class="branch-row">
+          <div class="node" id="n-s3">
+            <i class="ti ti-bucket ni"></i>
+            <span class="nl">S3 Archive</span>
+            <span class="ns" id="s-s3">—</span>
+          </div>
+          <div class="node" id="n-ddb">
+            <i class="ti ti-database ni"></i>
+            <span class="nl">DynamoDB</span>
+            <span class="ns" id="s-ddb">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error path (DLQ) -->
+      <div id="dlq-path" style="display:none;width:100%">
+        <div class="redrive-label" id="redrive-label">visibility timeout × 3 → maxReceiveCount=3 → SQS redrive</div>
+        <div class="arr-v" style="color:var(--red-border)">↓</div>
+        <div class="tier">
+          <div class="node" id="n-dlq">
+            <i class="ti ti-alert-circle ni"></i>
+            <span class="nl">Dead-Letter Queue</span>
+            <span class="ns" id="s-dlq">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Logs row -->
+      <div class="arr-v" style="color:var(--border-weak)">·</div>
+      <div class="tier" style="justify-content:flex-start;padding-left:1rem">
+        <div class="node" style="flex-direction:row;width:auto;gap:8px;padding:7px 12px;min-height:auto" id="n-logs">
+          <i class="ti ti-file-text ni" style="font-size:14px;margin:0"></i>
+          <span class="nl" style="font-size:9px">CloudWatch Logs</span>
+          <span class="ns" id="s-logs" style="margin:0;font-size:9px"></span>
+        </div>
+        <span style="font-size:9px;font-family:var(--mono);color:var(--text-hint);margin-left:8px">ingest + processor</span>
+      </div>
+
     </div>
 
-    <div id="architecture">
-        <div class="row">
-            <div class="node github" id="node-github">GitHub</div>
-            <div class="arrow">→</div>
-            <div class="node api" id="node-api">API Gateway</div>
-            <div class="arrow">→</div>
-            <div class="node lambda" id="node-ingest">Ingest Lambda</div>
-            <div class="arrow">→</div>
-            <div class="node sqs" id="node-sqs">SQS Queue</div>
-        </div>
-        <div class="row">
-            <div class="arrow">↓</div>
-        </div>
-        <div class="row">
-            <div class="node lambda" id="node-processor">Processor Lambda</div>
-        </div>
-        <div class="row" id="success-path">
-            <div class="arrow" style="transform: rotate(45deg);">↘</div>
-            <div class="arrow" style="transform: rotate(-45deg);">↙</div>
-        </div>
-        <div class="row" id="storage-nodes">
-            <div class="node s3" id="node-s3">S3 Archive<br><small id="s3-log">Waiting...</small></div>
-            <div class="node ddb" id="node-ddb">DynamoDB Index<br><small id="ddb-log">Waiting...</small></div>
-        </div>
-        <div class="row" id="error-path" style="display:none;">
-            <div class="arrow">↓</div>
-        </div>
-        <div class="row" id="dlq-node" style="display:none;">
-            <div class="node dlq" id="node-dlq">Dead Letter Queue<br><small id="dlq-count">Messages: 0</small></div>
-        </div>
+    <div class="log-section">
+      <div class="log-header"><i class="ti ti-terminal"></i> event log</div>
+      <div class="log-output" id="logbar">
+        <span class="log-line show" id="log-line">— awaiting event —</span>
+      </div>
     </div>
 
-    <script>
-        let dlqCount = 0;
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green-border)"></div>ok / processed</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red-border)"></div>error / failed</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--amber-border)"></div>retrying</div>
+    </div>
+  </div>
 
-        function sleep(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-        }
+  <footer class="footer">
+    <a href="https://github.com/AAAmer91/terraform-localstack-platform" target="_blank">
+      <i class="ti ti-brand-github"></i> terraform-localstack-platform
+    </a>
+    <a href="https://github.com/AAAmer91/webhook-k8s" target="_blank">
+      <i class="ti ti-brand-github"></i> webhook-k8s
+    </a>
+  </footer>
 
-        async function highlightNode(id, isError = false) {
-            const el = document.getElementById(id);
-            el.classList.add(isError ? 'error' : 'active');
-            await sleep(800);
-            el.classList.remove('active', 'error');
-        }
+</div>
 
-        async function runSimulation() {
-            const eventType = document.getElementById('eventType').value;
-            const isError = document.getElementById('simulateError').checked;
+<script>
+const $ = id => document.getElementById(id);
+const delay = ms => new Promise(r => setTimeout(r, ms));
+let running = false;
 
-            // Reset UI
-            document.getElementById('s3-log').innerText = 'Waiting...';
-            document.getElementById('ddb-log').innerText = 'Waiting...';
-            document.getElementById('success-path').style.display = 'flex';
-            document.getElementById('storage-nodes').style.display = 'flex';
-            document.getElementById('error-path').style.display = 'none';
-            document.getElementById('dlq-node').style.display = 'none';
+const ALL_NODES = ['github','apigw','ingest','sqs','proc','s3','ddb','dlq','logs'];
 
-            // Flow
-            await highlightNode('node-github');
-            await highlightNode('node-api');
-            await highlightNode('node-ingest');
-            await highlightNode('node-sqs');
-            
-            if (isError) {
-                await highlightNode('node-processor', true);
-                
-                // Route to DLQ
-                document.getElementById('success-path').style.display = 'none';
-                document.getElementById('storage-nodes').style.display = 'none';
-                document.getElementById('error-path').style.display = 'flex';
-                document.getElementById('dlq-node').style.display = 'flex';
-                
-                dlqCount++;
-                document.getElementById('dlq-count').innerText = `Messages: ${dlqCount}`;
-                await highlightNode('node-dlq');
-            } else {
-                await highlightNode('node-processor');
-                
-                // Route to S3 and DynamoDB
-                document.getElementById('s3-log').innerText = `events/${eventType}/...json`;
-                document.getElementById('ddb-log').innerText = `Indexed: ${eventType}`;
-                
-                highlightNode('node-s3');
-                highlightNode('node-ddb');
-            }
-        }
-    </script>
+function reset() {
+  ALL_NODES.forEach(id => {
+    const n = $('n-' + id);
+    if (n) { n.className = 'node'; n.style.opacity = ''; }
+    const s = $('s-' + id);
+    if (s && id !== 's3' && id !== 'ddb' && id !== 'dlq') s.textContent = '';
+  });
+  $('s-s3').textContent = '—';
+  $('s-ddb').textContent = '—';
+  $('s-dlq').textContent = '—';
+  $('success-path').style.display = '';
+  $('dlq-path').style.display = 'none';
+  $('redrive-label').className = 'redrive-label';
+  const lb = $('logbar');
+  lb.className = 'log-output';
+  const ll = $('log-line');
+  ll.textContent = '— awaiting event —';
+  ll.className = 'log-line show';
+}
+
+async function light(id, state, sub) {
+  const n = $('n-' + id);
+  const s = $('s-' + id);
+  if (!n) return;
+  n.className = 'node ' + state;
+  if (s && sub !== undefined) s.textContent = sub;
+  await delay(720);
+  n.className = 'node';
+  n.style.opacity = '1';
+}
+
+function setLog(msg, state) {
+  const lb = $('logbar');
+  const ll = $('log-line');
+  lb.className = 'log-output ' + (state || '');
+  ll.className = 'log-line';
+  void ll.offsetWidth;
+  ll.textContent = msg;
+  ll.className = 'log-line show';
+}
+
+async function run() {
+  if (running) return;
+  running = true;
+  $('runBtn').disabled = true;
+  reset();
+
+  const evType = $('evType').value;
+  const isErr  = $('simErr').checked;
+  const evId   = 'ci-' + Math.random().toString(36).slice(2, 10);
+
+  // GitHub fires webhook
+  setLog('POST /webhooks/github  X-GitHub-Event: ' + evType + '  X-GitHub-Delivery: ' + evId);
+  await light('github', 'ok', 'webhook fired');
+  await delay(80);
+
+  // API Gateway
+  await light('apigw', 'ok', 'POST → Lambda');
+  await delay(80);
+
+  // Ingest Lambda
+  setLog('{"message":"event_enqueued","event_id":"' + evId + '","event_type":"' + evType + '"}', 'ok');
+  await light('ingest', 'ok', '202 queued');
+  await delay(80);
+
+  // SQS
+  await light('sqs', 'ok', 'msg enqueued');
+  await delay(200);
+
+  if (isErr) {
+    // First attempt fails
+    setLog('{"message":"event_processing_failed","error":"RuntimeError: ..."}', 'err');
+    await light('proc', 'err', 'exception raised');
+    await delay(200);
+
+    // Retrying
+    setLog('SQS: visibility timeout expired — redelivering (attempt 2/3)...', '');
+    await light('proc', 'warn', 'retrying...');
+    await delay(400);
+
+    setLog('SQS: visibility timeout expired — redelivering (attempt 3/3)...', '');
+    await light('proc', 'warn', 'retrying...');
+    await delay(400);
+
+    // maxReceiveCount exhausted → DLQ via SQS redrive
+    $('success-path').style.display = 'none';
+    $('dlq-path').style.display = '';
+    $('redrive-label').className = 'redrive-label show';
+
+    setLog('SQS: maxReceiveCount=3 exhausted → redrive to DLQ', 'err');
+    await light('proc', 'err', 'batchItemFailure');
+    await delay(200);
+
+    $('s-dlq').textContent = '1 message';
+    await light('dlq', 'err', '1 message');
+    await light('logs', 'err', 'event_processing_failed');
+    setLog('{"message":"event_processing_failed","message_id":"' + evId + '","error":"RuntimeError"}', 'err');
+
+  } else {
+    // Success
+    const s3key = 'events/' + evType + '/' + evId + '.json';
+    setLog('{"message":"event_processed","event_id":"' + evId + '","s3_key":"' + s3key + '"}', 'ok');
+    await light('proc', 'ok', 'processed');
+    await delay(80);
+
+    $('s-s3').textContent  = s3key;
+    $('s-ddb').textContent = 'status: processed';
+    await Promise.all([
+      light('s3',  'ok', s3key),
+      delay(100).then(() => light('ddb', 'ok', 'indexed'))
+    ]);
+
+    await light('logs', 'ok', 'event_processed ✓');
+    setLog('{"message":"event_processed","event_type":"' + evType + '","repository":"AAAmer91/terraform-localstack-platform"}', 'ok');
+  }
+
+  running = false;
+  $('runBtn').disabled = false;
+}
+</script>
 </body>
 </html>
