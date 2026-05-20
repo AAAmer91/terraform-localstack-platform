@@ -1,0 +1,41 @@
+# --- Terraform ---
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+*.tfvars
+*.tfvars.json
+*tfplan*
+crash.log
+crash.*.log
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+.hypothesis/
+.pytest_cache/
+
+# --- Local Artifacts & Test Output ---
+infra/lambda.zip
+app/handler.zip
+*.zip
+infra/payload.json
+infra/response.json
+
+# --- OS ---
+.DS_Store
+Thumbs.db
