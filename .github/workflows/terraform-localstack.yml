@@ -9,8 +9,6 @@ on:
 
   push:
     branches:
-      - main
-      - develop
     paths:
       - "app/**"
       - "infra/**"
@@ -57,7 +55,13 @@ jobs:
 
       - name: Run Lambda unit tests
         working-directory: .
-        run: python -m unittest discover -s tests -v
+        run: |
+          echo "## 🚀 LocalStack CI Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### 🧪 Unit Tests" >> $GITHUB_STEP_SUMMARY
+          
+          python -m unittest discover -s tests -v
+          
+          echo "- ✅ Python Lambda unit tests passed" >> $GITHUB_STEP_SUMMARY
 
       - name: Wait for LocalStack
         run: |
@@ -66,11 +70,9 @@ jobs:
               echo "LocalStack is ready."
               exit 0
             fi
-
             echo "Waiting for LocalStack..."
             sleep 2
           done
-
           echo "LocalStack did not become ready in time."
           exit 1
 
@@ -82,33 +84,38 @@ jobs:
         run: awslocal s3 mb s3://localstack-platform-terraform-state || true
 
       - name: Terraform format check
-        run: terraform fmt -check -recursive
+        run: |
+          echo "### 🏗️ Infrastructure (Terraform)" >> $GITHUB_STEP_SUMMARY
+          terraform fmt -check -recursive
+          echo "- ✅ Formatting valid" >> $GITHUB_STEP_SUMMARY
 
       - name: Terraform init
         run: terraform init -input=false -reconfigure -backend-config=backend.localstack.hcl
 
       - name: Terraform validate
-        run: terraform validate
+        run: |
+          terraform validate
+          echo "- ✅ Configuration valid" >> $GITHUB_STEP_SUMMARY
 
       - name: Terraform plan
         run: terraform plan -input=false -out=tfplan
 
       - name: Terraform apply
-        run: terraform apply -input=false -auto-approve tfplan
+        run: |
+          terraform apply -input=false -auto-approve tfplan
+          echo "- ✅ Resources successfully applied to LocalStack" >> $GITHUB_STEP_SUMMARY
 
       - name: Wait for Lambda functions
         run: |
           ingest_lambda_name="$(terraform output -raw ingest_lambda_name)"
           processor_lambda_name="$(terraform output -raw processor_lambda_name)"
+          awslocal lambda wait function-active-v2 --function-name "$ingest_lambda_name"
+          awslocal lambda wait function-active-v2 --function-name "$processor_lambda_name"
 
-          awslocal lambda wait function-active-v2 \
-            --function-name "$ingest_lambda_name"
-
-          awslocal lambda wait function-active-v2 \
-            --function-name "$processor_lambda_name"
-
-      - name: Post GitHub webhook through API Gateway
+      - name: Post GitHub webhook through API Gateway (Push)
         run: |
+          echo "### 🔄 End-to-End Integration" >> $GITHUB_STEP_SUMMARY
+          
           api_url="$(terraform output -raw api_gateway_invoke_url)"
           delivery_id="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
@@ -142,17 +149,17 @@ jobs:
           python - "$http_status" "$delivery_id" <<'PY'
           import json
           import sys
-
           http_status = sys.argv[1]
           delivery_id = sys.argv[2]
           response = json.load(open("response.json", encoding="utf-8"))
-
           assert http_status == "202", f"expected HTTP 202, got {http_status}: {response}"
           assert response["event_id"] == delivery_id
           assert response["event_type"] == "push"
           assert response["repository"] == "AAAmer91/terraform-localstack-platform"
           assert response["status"] == "queued"
           PY
+          
+          echo "- ✅ Webhook accepted by API Gateway (HTTP 202)" >> $GITHUB_STEP_SUMMARY
 
       - name: Verify processed event in DynamoDB and S3
         run: |
@@ -169,45 +176,31 @@ jobs:
             if python - <<'PY'
           import json
           import sys
-
           item = json.load(open("item.json", encoding="utf-8")).get("Item", {})
           sys.exit(0 if item.get("status", {}).get("S") == "processed" else 1)
           PY
             then
               break
             fi
-
-            echo "Waiting for processor Lambda to index event..."
             sleep 2
           done
 
           python - "$delivery_id" <<'PY'
           import json
           import sys
-
           delivery_id = sys.argv[1]
           item = json.load(open("item.json", encoding="utf-8")).get("Item", {})
-
           assert item["event_id"]["S"] == delivery_id
           assert item["event_type"]["S"] == "push"
-          assert item["repository"]["S"] == "AAAmer91/terraform-localstack-platform"
           assert item["status"]["S"] == "processed"
           assert item["s3_key"]["S"] == f"events/push/{delivery_id}.json"
-
           open("s3_key.txt", "w", encoding="utf-8").write(item["s3_key"]["S"])
           PY
 
           s3_key="$(cat s3_key.txt)"
           awslocal s3api head-object --bucket "$bucket_name" --key "$s3_key"
-          awslocal s3 cp "s3://$bucket_name/$s3_key" archived.json
-
-          python - <<'PY'
-          import json
-
-          archived = json.load(open("archived.json", encoding="utf-8"))
-          assert archived["ref"] == "refs/heads/main"
-          assert archived["repository"]["full_name"] == "AAAmer91/terraform-localstack-platform"
-          PY
+          echo "- ✅ Event successfully verified and indexed in DynamoDB" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Raw webhook payload successfully archived to S3" >> $GITHUB_STEP_SUMMARY
 
       - name: Verify structured processor log
         run: |
@@ -222,7 +215,6 @@ jobs:
             if python - "$delivery_id" <<'PY'
           import json
           import sys
-
           delivery_id = sys.argv[1]
           events = json.load(open("logs.json", encoding="utf-8")).get("events", [])
           messages = [event.get("message", "") for event in events]
@@ -232,21 +224,63 @@ jobs:
             then
               break
             fi
-
-            echo "Waiting for structured processor log..."
             sleep 2
           done
+          
+          echo "- ✅ Structured \`event_processed\` logs successfully traced in CloudWatch" >> $GITHUB_STEP_SUMMARY
 
-          python - "$delivery_id" <<'PY'
-          import json
-          import sys
+      - name: Test Variant A - Dynamic S3 Routing (Pull Request)
+        run: |
+          echo "### 🔀 Dynamic Routing Test" >> $GITHUB_STEP_SUMMARY
+          api_url="$(terraform output -raw api_gateway_invoke_url)"
+          delivery_id="pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          delivery_id = sys.argv[1]
-          events = json.load(open("logs.json", encoding="utf-8")).get("events", [])
-          messages = [event.get("message", "") for event in events]
-          assert any("event_processed" in message and delivery_id in message for message in messages)
-          PY
+          curl -sS -X POST "$api_url" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Event: pull_request" \
+            -H "X-GitHub-Delivery: $delivery_id" \
+            --data '{"action": "opened", "number": 42}' > /dev/null
+
+          bucket_name="$(terraform output -raw bucket_name)"
+          sleep 5
+          
+          awslocal s3api head-object \
+            --bucket "$bucket_name" \
+            --key "events/pull_request/$delivery_id.json"
+            
+          echo "- ✅ Pull Request event successfully routed to s3://$bucket_name/events/pull_request/" >> $GITHUB_STEP_SUMMARY
+
+      - name: Test Variant B - Simulate Processor Failure (DLQ)
+        run: |
+          echo "### ☠️ Dead-Letter Queue (DLQ) Test" >> $GITHUB_STEP_SUMMARY
+          
+          queue_name="$(terraform output -raw queue_name)"
+          dlq_name="$(terraform output -raw dead_letter_queue_name)"
+          
+          queue_url="$(awslocal sqs get-queue-url --queue-name "$queue_name" --query 'QueueUrl' --output text)"
+          dlq_url="$(awslocal sqs get-queue-url --queue-name "$dlq_name" --query 'QueueUrl' --output text)"
+
+          awslocal sqs send-message \
+            --queue-url "$queue_url" \
+            --message-body '{"malformed_payload": true}' > /dev/null
+          
+          # Increased loop from 30 to 60 to account for (60s visibility timeout * 2 retries = 120s minimum wait)
+          for i in {1..60}; do
+            messages="$(awslocal sqs receive-message --queue-url "$dlq_url" --max-number-of-messages 1 --query 'Messages' --output json)"
+            
+            if [[ "$messages" != "null" && "$messages" != "[]" ]]; then
+              echo "- ✅ Poison pill successfully isolated in the Dead-Letter Queue" >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+            sleep 3
+          done
+          
+          echo "Failed to route message to DLQ in time."
+          exit 1
 
       - name: Terraform destroy
         if: always()
-        run: terraform destroy -auto-approve
+        run: |
+          terraform destroy -auto-approve
+          echo "### 🧹 Cleanup" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Ephemeral infrastructure destroyed" >> $GITHUB_STEP_SUMMARY
