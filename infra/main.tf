@@ -3,7 +3,8 @@ locals {
 }
 
 resource "aws_s3_bucket" "events" {
-  bucket = "${local.name_prefix}-events"
+  bucket        = "${local.name_prefix}-events"
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_public_access_block" "events" {
