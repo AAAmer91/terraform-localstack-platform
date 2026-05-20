@@ -57,7 +57,13 @@ jobs:
 
       - name: Run Lambda unit tests
         working-directory: .
-        run: python -m unittest discover -s tests -v
+        run: |
+          echo "## 🚀 LocalStack CI Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### 🧪 Unit Tests" >> $GITHUB_STEP_SUMMARY
+          
+          python -m unittest discover -s tests -v
+          
+          echo "- ✅ Python Lambda unit tests passed" >> $GITHUB_STEP_SUMMARY
 
       - name: Wait for LocalStack
         run: |
@@ -82,19 +88,26 @@ jobs:
         run: awslocal s3 mb s3://localstack-platform-terraform-state || true
 
       - name: Terraform format check
-        run: terraform fmt -check -recursive
+        run: |
+          echo "### 🏗️ Infrastructure (Terraform)" >> $GITHUB_STEP_SUMMARY
+          terraform fmt -check -recursive
+          echo "- ✅ Formatting valid" >> $GITHUB_STEP_SUMMARY
 
       - name: Terraform init
         run: terraform init -input=false -reconfigure -backend-config=backend.localstack.hcl
 
       - name: Terraform validate
-        run: terraform validate
+        run: |
+          terraform validate
+          echo "- ✅ Configuration valid" >> $GITHUB_STEP_SUMMARY
 
       - name: Terraform plan
         run: terraform plan -input=false -out=tfplan
 
       - name: Terraform apply
-        run: terraform apply -input=false -auto-approve tfplan
+        run: |
+          terraform apply -input=false -auto-approve tfplan
+          echo "- ✅ Resources successfully applied to LocalStack" >> $GITHUB_STEP_SUMMARY
 
       - name: Wait for Lambda functions
         run: |
@@ -109,6 +122,8 @@ jobs:
 
       - name: Post GitHub webhook through API Gateway
         run: |
+          echo "### 🔄 End-to-End Integration" >> $GITHUB_STEP_SUMMARY
+          
           api_url="$(terraform output -raw api_gateway_invoke_url)"
           delivery_id="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
@@ -153,6 +168,8 @@ jobs:
           assert response["repository"] == "AAAmer91/terraform-localstack-platform"
           assert response["status"] == "queued"
           PY
+          
+          echo "- ✅ Webhook accepted by API Gateway (HTTP 202)" >> $GITHUB_STEP_SUMMARY
 
       - name: Verify processed event in DynamoDB and S3
         run: |
@@ -208,6 +225,9 @@ jobs:
           assert archived["ref"] == "refs/heads/main"
           assert archived["repository"]["full_name"] == "AAAmer91/terraform-localstack-platform"
           PY
+          
+          echo "- ✅ Event successfully verified and indexed in DynamoDB" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Raw webhook payload successfully archived to S3" >> $GITHUB_STEP_SUMMARY
 
       - name: Verify structured processor log
         run: |
@@ -246,7 +266,12 @@ jobs:
           messages = [event.get("message", "") for event in events]
           assert any("event_processed" in message and delivery_id in message for message in messages)
           PY
+          
+          echo "- ✅ Structured \`event_processed\` logs successfully traced in CloudWatch" >> $GITHUB_STEP_SUMMARY
 
       - name: Terraform destroy
         if: always()
-        run: terraform destroy -auto-approve
+        run: |
+          terraform destroy -auto-approve
+          echo "### 🧹 Cleanup" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Ephemeral infrastructure destroyed" >> $GITHUB_STEP_SUMMARY
