@@ -31,12 +31,15 @@ jobs:
 
     services:
       localstack:
-        image: localstack/localstack:latest
+        image: localstack/localstack:4.4.0
         ports:
           - 4566:4566
+          - 4510-4559:4510-4559
         env:
           SERVICES: s3,dynamodb,lambda,iam,logs,sts
           AWS_DEFAULT_REGION: eu-central-1
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
 
     defaults:
       run:
@@ -89,6 +92,9 @@ jobs:
       - name: Invoke Lambda
         run: |
           lambda_name="$(terraform output -raw lambda_name)"
+
+          awslocal lambda wait function-active-v2 \
+            --function-name "$lambda_name"
 
           awslocal lambda invoke \
             --function-name "$lambda_name" \
